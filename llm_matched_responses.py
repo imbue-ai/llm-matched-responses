@@ -17,6 +17,8 @@ The responses file format is:
     }
 """
 
+from __future__ import annotations
+
 import json
 import os
 from collections.abc import Callable
