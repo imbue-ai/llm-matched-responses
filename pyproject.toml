@@ -21,5 +21,8 @@ Homepage = "https://github.com/imbue-ai/llm-matched-responses"
 [project.entry-points.llm]
 matched_responses = "llm_matched_responses"
 
+[tool.setuptools]
+py-modules = ["llm_matched_responses"]
+
 [project.optional-dependencies]
 test = ["pytest"]
