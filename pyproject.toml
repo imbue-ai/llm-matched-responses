@@ -1,6 +1,6 @@
 [project]
 name = "llm-matched-responses"
-version = "0.1.0"
+version = "0.0.1"
 description = "An llm plugin that provides a matched-responses model for testing - returns configurable responses based on input patterns"
 requires-python = ">=3.11"
 dependencies = [
