@@ -15,6 +15,18 @@ The responses file format is:
         "hello": "Hello! I am the test model.",
         "help": "I am a test model that returns matched responses."
     }
+
+Tool call support:
+    If tools are provided and the resolved response is a JSON object
+    containing a "tool_calls" key, the model will emit those as tool
+    calls. Each tool call should have "name" and "arguments" keys.
+    Example response value:
+        {
+            "tool_calls": [
+                {"name": "my_tool", "arguments": {"arg1": "value1"}}
+            ],
+            "text": "optional text response"
+        }
 """
 
 from __future__ import annotations
@@ -39,6 +51,7 @@ class MatchedResponsesModel(llm.Model):
 
     model_id = MODEL_ID
     can_stream = True
+    supports_tools = True
 
     def execute(
         self,
@@ -56,7 +69,37 @@ class MatchedResponsesModel(llm.Model):
             output=len(reply.split()),
         )
 
+        if prompt.tools:
+            tool_calls = _try_parse_tool_calls(reply)
+            if tool_calls is not None:
+                for tc in tool_calls["tool_calls"]:
+                    response.add_tool_call(
+                        llm.ToolCall(
+                            name=tc["name"],
+                            arguments=tc.get("arguments", {}),
+                        )
+                    )
+                text = tool_calls.get("text", "")
+                if text:
+                    yield text
+                return
+
         yield reply
+
+
+def _try_parse_tool_calls(reply: str) -> dict | None:
+    """Try to parse a reply as a tool calls JSON object.
+
+    Returns the parsed dict if the reply is a JSON object with a
+    "tool_calls" key, otherwise returns None.
+    """
+    try:
+        parsed = json.loads(reply)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if isinstance(parsed, dict) and "tool_calls" in parsed:
+        return parsed
+    return None
 
 
 def resolve_response(user_message: str) -> str:

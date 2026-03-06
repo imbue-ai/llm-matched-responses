@@ -3,7 +3,10 @@
 import json
 from pathlib import Path
 
+import llm
 import pytest
+from llm_matched_responses import MatchedResponsesModel
+from llm_matched_responses import _try_parse_tool_calls
 from llm_matched_responses import resolve_response
 
 
@@ -58,3 +61,84 @@ def test_responses_file_invalid_json_raises(monkeypatch: pytest.MonkeyPatch, tmp
     monkeypatch.setenv("LLM_MATCHED_RESPONSES_FILE", str(bad_file))
     with pytest.raises(json.JSONDecodeError):
         resolve_response("hello")
+
+
+def test_supports_tools_attribute() -> None:
+    model = MatchedResponsesModel()
+    assert model.supports_tools is True
+
+
+def test_try_parse_tool_calls_valid() -> None:
+    reply = json.dumps({
+        "tool_calls": [{"name": "my_tool", "arguments": {"x": 1}}],
+        "text": "hello",
+    })
+    result = _try_parse_tool_calls(reply)
+    assert result is not None
+    assert len(result["tool_calls"]) == 1
+    assert result["tool_calls"][0]["name"] == "my_tool"
+    assert result["text"] == "hello"
+
+
+def test_try_parse_tool_calls_plain_text() -> None:
+    assert _try_parse_tool_calls("Echo: hello") is None
+
+
+def test_try_parse_tool_calls_json_without_tool_calls() -> None:
+    assert _try_parse_tool_calls(json.dumps({"foo": "bar"})) is None
+
+
+def test_try_parse_tool_calls_not_a_dict() -> None:
+    assert _try_parse_tool_calls(json.dumps([1, 2, 3])) is None
+
+
+def test_execute_with_tools_returns_tool_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When tools are provided and response contains tool_calls JSON, the model emits tool calls."""
+    tool_response = json.dumps({
+        "tool_calls": [{"name": "get_weather", "arguments": {"city": "SF"}}],
+        "text": "Calling tool",
+    })
+    monkeypatch.setenv("LLM_MATCHED_RESPONSE", tool_response)
+
+    model = MatchedResponsesModel()
+    response = model.prompt("what's the weather?", tools=[_dummy_tool()])
+    text = response.text()
+    assert text == "Calling tool"
+    assert len(response.tool_calls()) == 1
+    assert response.tool_calls()[0].name == "get_weather"
+    assert response.tool_calls()[0].arguments == {"city": "SF"}
+
+
+def test_execute_with_tools_plain_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When tools are provided but response is plain text, no tool calls are emitted."""
+    monkeypatch.setenv("LLM_MATCHED_RESPONSE", "just text")
+
+    model = MatchedResponsesModel()
+    response = model.prompt("hello", tools=[_dummy_tool()])
+    assert response.text() == "just text"
+    assert response.tool_calls() == []
+
+
+def test_execute_without_tools_ignores_tool_calls_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When no tools are provided, tool_calls JSON is returned as plain text."""
+    tool_response = json.dumps({
+        "tool_calls": [{"name": "get_weather", "arguments": {}}],
+    })
+    monkeypatch.setenv("LLM_MATCHED_RESPONSE", tool_response)
+
+    model = MatchedResponsesModel()
+    response = model.prompt("hello")
+    assert response.text() == tool_response
+
+
+def _dummy_tool() -> llm.Tool:
+    """Create a minimal Tool for testing."""
+    return llm.Tool(
+        name="get_weather",
+        description="Get weather for a city",
+        input_schema={
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+        },
+        implementation=lambda city: f"Weather in {city}: sunny",
+    )
